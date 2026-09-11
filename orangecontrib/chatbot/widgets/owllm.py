@@ -893,11 +893,11 @@ class OWLLM(widget.OWWidget):
             "Waiting for retriever...",
         )
 
-        prompt_box = gui.widgetBox(self.controlArea, "Dataset Prompt Status")
+        prompt_box = gui.widgetBox(self.controlArea, "Prompt Status")
         self.prompt_status_label = gui.label(
             prompt_box,
             self,
-            "Waiting for prompt config...",
+            "Waiting for prompt...",
         )
 
         info_box = gui.widgetBox(self.controlArea, "Info")
@@ -1557,17 +1557,28 @@ class OWLLM(widget.OWWidget):
 
     @Inputs.prompt_config
     def set_prompt_config(self, prompt_config):
+        """Receive manual instructions from the Prompt widget."""
         self.prompt_config = prompt_config
 
         if prompt_config is None:
-            self.prompt_status_label.setText("⚠ Waiting for prompt config...")
+            self.prompt_status_label.setText("⚠ Waiting for prompt...")
         else:
-            total = prompt_config.get("total_examples", 0)
             layer_name = prompt_config.get("layer_name", "Prompt Layer")
+            prompt_text = (
+                prompt_config.get("prompt_text")
+                or prompt_config.get("prompt_instruction")
+                or ""
+            ).strip()
 
-            self.prompt_status_label.setText(
-                f"✓ Prompt Config connected: {layer_name} ({total} examples)"
-            )
+            if prompt_text:
+                self.prompt_status_label.setText(
+                    f"✓ Prompt connected: {layer_name} "
+                    f"({len(prompt_text)} characters)"
+                )
+            else:
+                self.prompt_status_label.setText(
+                    "⚠ Prompt connected, but empty"
+                )
 
         self._update_token_cap()
         self._update_config()
@@ -1577,6 +1588,7 @@ class OWLLM(widget.OWWidget):
     # ------------------------------------------------------------------
 
     def _update_config(self):
+        """Build the LLM configuration sent to the Chatbot widget."""
         model_name = self._selected_model_name()
         model_config = self._selected_model_config()
 
@@ -1586,11 +1598,24 @@ class OWLLM(widget.OWWidget):
             return
 
         layer_name = None
+        prompt_text = ""
+        prompt_enabled = False
 
         if self.prompt_config is not None:
-            layer_name = self.prompt_config.get("layer_name", "Prompt Layer")
+            layer_name = self.prompt_config.get(
+                "layer_name",
+                "Prompt Layer",
+            )
+            prompt_text = (
+                self.prompt_config.get("prompt_text")
+                or self.prompt_config.get("prompt_instruction")
+                or ""
+            ).strip()
+            prompt_enabled = bool(prompt_text)
 
-        if self.retriever is None and self.prompt_config is None:
+        # Keep the current workflow rule: the widget sends a configuration
+        # only when a Retriever or a valid manual Prompt is connected.
+        if self.retriever is None and not prompt_enabled:
             self.Outputs.llm_config.send(None)
             self.info.set_output_summary(self.info.NoOutput)
             return
@@ -1613,18 +1638,20 @@ class OWLLM(widget.OWWidget):
             "rag_enabled": self.retriever is not None,
 
             "prompt_config": self.prompt_config,
-            "dataset_prompt_enabled": self.prompt_config is not None,
+            "prompt_text": prompt_text,
+            "prompt_instruction": prompt_text,
+            "prompt_enabled": prompt_enabled,
             "layer_name": layer_name,
         }
 
         self.Outputs.llm_config.send(self.llm_config)
 
-        if self.retriever is not None and self.prompt_config is not None:
-            summary = f"{model_name} with RAG + Dataset Prompt: {layer_name}"
+        if self.retriever is not None and prompt_enabled:
+            summary = f"{model_name} with RAG + Prompt: {layer_name}"
         elif self.retriever is not None:
             summary = f"{model_name} with RAG"
-        elif self.prompt_config is not None:
-            summary = f"{model_name} with Dataset Prompt: {layer_name}"
+        elif prompt_enabled:
+            summary = f"{model_name} with Prompt: {layer_name}"
         else:
             summary = model_name
 
